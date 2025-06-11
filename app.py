@@ -3,13 +3,11 @@ import json
 import os
 from twilio.rest import Client
 from datetime import datetime
-from apscheduler.schedulers.background import BackgroundScheduler
-import atexit
 import yfinance as yf
 
 app = Flask(__name__)
 
-# Función para enviar resumen por WhatsApp usando Twilio
+# Función para generar resumen (igual que antes)
 def generar_resumen_completo():
     base_path = os.path.dirname(__file__)
     json_path = os.path.join(base_path, 'inversiones.json')
@@ -62,10 +60,10 @@ def generar_resumen_completo():
 
     return resumen
 
+# Función para enviar resumen via Twilio
 def enviar_resumen_twilio():
     resumen = generar_resumen_completo()
 
-    # Leer variables de entorno para Twilio
     account_sid = os.environ.get("TWILIO_ACCOUNT_SID")
     auth_token = os.environ.get("TWILIO_AUTH_TOKEN")
     from_whatsapp_number = os.environ.get("TWILIO_WHATSAPP_FROM")
@@ -73,7 +71,7 @@ def enviar_resumen_twilio():
 
     if not all([account_sid, auth_token, from_whatsapp_number, to_whatsapp_number]):
         print("Error: Falta alguna variable de entorno de Twilio.")
-        return
+        return "Error: Variables de entorno incompletas."
 
     client = Client(account_sid, auth_token)
 
@@ -84,6 +82,7 @@ def enviar_resumen_twilio():
     )
 
     print(f"✅ Mensaje automático enviado: {message.sid}")
+    return "Mensaje enviado correctamente."
 
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_webhook():
@@ -95,7 +94,6 @@ def whatsapp_webhook():
     except Exception:
         comando = ""
 
-    # Leer JSON actual
     with open("inversiones.json", "r") as f:
         inversiones = json.load(f)
 
@@ -154,14 +152,12 @@ def whatsapp_webhook():
     respuesta_completa = respuesta + resumen
     return Response(f"<Response><Message>{respuesta_completa}</Message></Response>", mimetype='text/xml')
 
+# Nuevo endpoint para enviar resumen manualmente
+@app.route("/resumen", methods=["GET"])
+def resumen_manual():
+    resultado = enviar_resumen_twilio()
+    return resultado, 200
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-
-    # Configurar scheduler
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(enviar_resumen_twilio, 'cron', hour='12,17', minute=0)  # 12:00 y 17:00
-    scheduler.start()
-
-    atexit.register(lambda: scheduler.shutdown())
-
     app.run(host="0.0.0.0", port=port)
