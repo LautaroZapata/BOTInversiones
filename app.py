@@ -1,60 +1,69 @@
 from flask import Flask, request, Response
 import json
 import os
-import traceback
 
 app = Flask(__name__)
 
+def guardar_inversiones(inversiones):
+    with open("inversiones.json", "w") as f:
+        json.dump(inversiones, f, indent=4)
+
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_webhook():
+    from_number = request.values.get('From', '')
+    body = request.values.get('Body', '').strip()
+
+    inversiones = {}
     try:
-        print("Nuevo mensaje recibido")
-        from_number = request.values.get('From', '')
-        body = request.values.get('Body', '')
-        print(f"De: {from_number}, Mensaje: {body}")
-
-        # Parsear el mensaje
-        try:
-            simbolo, cantidad, precio = body.strip().split()
-            cantidad = float(cantidad)
-            precio = float(precio)
-            print(f"Datos parseados: {simbolo}, {cantidad}, {precio}")
-        except Exception:
-            respuesta = "Formato incorrecto. Usa: SIMBOLO CANTIDAD PRECIO"
-            print("Error en parseo del mensaje")
-            return Response(f"<Response><Message>{respuesta}</Message></Response>", mimetype='text/xml')
-
-        # Crear archivo si no existe
-        if not os.path.exists("inversiones.json"):
-            with open("inversiones.json", "w") as f:
-                f.write("{}")
-            print("Archivo inversiones.json creado")
-
-        # Leer inversiones
         with open("inversiones.json", "r") as f:
             inversiones = json.load(f)
-        print("Archivo inversiones.json leído")
+    except FileNotFoundError:
+        inversiones = {}
 
-        # Actualizar inversiones
+    # Comando borrar
+    if body.upper().startswith("BORRAR "):
+        try:
+            _, simbolo, cantidad_str = body.split()
+            cantidad = float(cantidad_str)
+        except Exception:
+            respuesta = "Formato incorrecto para borrar. Usa: BORRAR SIMBOLO CANTIDAD"
+            return Response(f"<Response><Message>{respuesta}</Message></Response>", mimetype='text/xml')
+
         if simbolo in inversiones:
-            inversiones[simbolo].append({"cantidad": cantidad, "precio_compra": precio})
+            lista = inversiones[simbolo]
+            # Buscar inversión con esa cantidad para borrar
+            for i, inv in enumerate(lista):
+                if inv.get("cantidad") == cantidad:
+                    lista.pop(i)
+                    if not lista:
+                        inversiones.pop(simbolo)
+                    guardar_inversiones(inversiones)
+                    respuesta = f"Inversión borrada: {simbolo} {cantidad} acciones."
+                    return Response(f"<Response><Message>{respuesta}</Message></Response>", mimetype='text/xml')
+
+            respuesta = f"No se encontró inversión con {cantidad} acciones en {simbolo}."
         else:
-            inversiones[simbolo] = [{"cantidad": cantidad, "precio_compra": precio}]
+            respuesta = f"No hay inversiones para {simbolo}."
+        return Response(f"<Response><Message>{respuesta}</Message></Response>", mimetype='text/xml')
 
-        with open("inversiones.json", "w") as f:
-            json.dump(inversiones, f, indent=4)
-        print("Archivo inversiones.json actualizado")
+    # Comando agregar compra (default)
+    try:
+        simbolo, cantidad_str, precio_str = body.split()
+        cantidad = float(cantidad_str)
+        precio = float(precio_str)
+    except Exception:
+        respuesta = "Formato incorrecto. Usa: SIMBOLO CANTIDAD PRECIO o BORRAR SIMBOLO CANTIDAD"
+        return Response(f"<Response><Message>{respuesta}</Message></Response>", mimetype='text/xml')
 
-        respuesta = f"Compra registrada: {simbolo} {cantidad} acciones a ${precio}"
+    if simbolo in inversiones:
+        inversiones[simbolo].append({"cantidad": cantidad, "precio_compra": precio})
+    else:
+        inversiones[simbolo] = [{"cantidad": cantidad, "precio_compra": precio}]
 
-    except Exception as e:
-        print("Error inesperado:", e)
-        traceback.print_exc()
-        respuesta = f"Error procesando mensaje."
-
+    guardar_inversiones(inversiones)
+    respuesta = f"Compra registrada: {simbolo} {cantidad} acciones a ${precio}"
     return Response(f"<Response><Message>{respuesta}</Message></Response>", mimetype='text/xml')
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    print(f"Iniciando app en puerto {port}")
     app.run(host="0.0.0.0", port=port)
