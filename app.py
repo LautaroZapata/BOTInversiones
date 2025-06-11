@@ -4,65 +4,82 @@ import os
 
 app = Flask(__name__)
 
-def guardar_inversiones(inversiones):
-    with open("inversiones.json", "w") as f:
-        json.dump(inversiones, f, indent=4)
+def resumen_inversiones(inversiones):
+    # Construye un string con todas las inversiones actuales para enviar en el mensaje
+    resumen = "Inversiones actuales:\n"
+    for simbolo, operaciones in inversiones.items():
+        total_cantidad = sum(op["cantidad"] for op in operaciones)
+        resumen += f"{simbolo}: {total_cantidad} acciones\n"
+    return resumen
 
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_webhook():
     from_number = request.values.get('From', '')
-    body = request.values.get('Body', '').strip()
+    body = request.values.get('Body', '')
 
-    inversiones = {}
     try:
-        with open("inversiones.json", "r") as f:
-            inversiones = json.load(f)
-    except FileNotFoundError:
-        inversiones = {}
+        comando = body.strip().split()[0].upper()
+    except Exception:
+        comando = ""
 
-    # Comando borrar
-    if body.upper().startswith("BORRAR "):
+    # Leer JSON actual
+    with open("inversiones.json", "r") as f:
+        inversiones = json.load(f)
+
+    if comando == "BORRAR":
+        # Esperamos formato: BORRAR SIMBOLO CANTIDAD PRECIO (para borrar una operación)
         try:
-            _, simbolo, cantidad_str = body.split()
-            cantidad = float(cantidad_str)
+            _, simbolo, cantidad, precio = body.strip().split()
+            cantidad = float(cantidad)
+            precio = float(precio)
         except Exception:
-            respuesta = "Formato incorrecto para borrar. Usa: BORRAR SIMBOLO CANTIDAD"
+            respuesta = "Formato para borrar: BORRAR SIMBOLO CANTIDAD PRECIO"
             return Response(f"<Response><Message>{respuesta}</Message></Response>", mimetype='text/xml')
 
         if simbolo in inversiones:
-            lista = inversiones[simbolo]
-            # Buscar inversión con esa cantidad para borrar
-            for i, inv in enumerate(lista):
-                if inv.get("cantidad") == cantidad:
-                    lista.pop(i)
-                    if not lista:
-                        inversiones.pop(simbolo)
-                    guardar_inversiones(inversiones)
-                    respuesta = f"Inversión borrada: {simbolo} {cantidad} acciones."
-                    return Response(f"<Response><Message>{respuesta}</Message></Response>", mimetype='text/xml')
-
-            respuesta = f"No se encontró inversión con {cantidad} acciones en {simbolo}."
+            # Buscamos la compra exacta para eliminarla
+            encontrado = False
+            for op in inversiones[simbolo]:
+                if op["cantidad"] == cantidad and op["precio_compra"] == precio:
+                    inversiones[simbolo].remove(op)
+                    encontrado = True
+                    break
+            if not encontrado:
+                respuesta = "No se encontró esa compra para borrar."
+            else:
+                # Si queda vacío, borrar la clave entera
+                if not inversiones[simbolo]:
+                    del inversiones[simbolo]
+                respuesta = f"Compra borrada: {simbolo} {cantidad} acciones a ${precio}"
         else:
-            respuesta = f"No hay inversiones para {simbolo}."
-        return Response(f"<Response><Message>{respuesta}</Message></Response>", mimetype='text/xml')
+            respuesta = "No hay inversiones para ese símbolo."
 
-    # Comando agregar compra (default)
-    try:
-        simbolo, cantidad_str, precio_str = body.split()
-        cantidad = float(cantidad_str)
-        precio = float(precio_str)
-    except Exception:
-        respuesta = "Formato incorrecto. Usa: SIMBOLO CANTIDAD PRECIO o BORRAR SIMBOLO CANTIDAD"
-        return Response(f"<Response><Message>{respuesta}</Message></Response>", mimetype='text/xml')
-
-    if simbolo in inversiones:
-        inversiones[simbolo].append({"cantidad": cantidad, "precio_compra": precio})
     else:
-        inversiones[simbolo] = [{"cantidad": cantidad, "precio_compra": precio}]
+        # Asumimos que es compra: SIMBOLO CANTIDAD PRECIO
+        try:
+            simbolo, cantidad, precio = body.strip().split()
+            cantidad = float(cantidad)
+            precio = float(precio)
+        except Exception:
+            respuesta = "Formato incorrecto. Usa: SIMBOLO CANTIDAD PRECIO o BORRAR SIMBOLO CANTIDAD PRECIO"
+            return Response(f"<Response><Message>{respuesta}</Message></Response>", mimetype='text/xml')
 
-    guardar_inversiones(inversiones)
-    respuesta = f"Compra registrada: {simbolo} {cantidad} acciones a ${precio}"
-    return Response(f"<Response><Message>{respuesta}</Message></Response>", mimetype='text/xml')
+        if simbolo in inversiones:
+            inversiones[simbolo].append({"cantidad": cantidad, "precio_compra": precio})
+        else:
+            inversiones[simbolo] = [{"cantidad": cantidad, "precio_compra": precio}]
+        respuesta = f"Compra registrada: {simbolo} {cantidad} acciones a ${precio}"
+
+    # Guardar cambios
+    with open("inversiones.json", "w") as f:
+        json.dump(inversiones, f, indent=4)
+
+    # Agregar resumen actualizado al mensaje
+    resumen = resumen_inversiones(inversiones)
+    respuesta_completa = respuesta + "\n\n" + resumen
+
+    return Response(f"<Response><Message>{respuesta_completa}</Message></Response>", mimetype='text/xml')
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
