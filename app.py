@@ -7,7 +7,6 @@ import yfinance as yf
 
 app = Flask(__name__)
 
-# Función para generar resumen (igual que antes)
 def generar_resumen_completo():
     base_path = os.path.dirname(__file__)
     json_path = os.path.join(base_path, 'inversiones.json')
@@ -60,7 +59,6 @@ def generar_resumen_completo():
 
     return resumen
 
-# Función para enviar resumen via Twilio
 def enviar_resumen_twilio():
     resumen = generar_resumen_completo()
 
@@ -86,7 +84,6 @@ def enviar_resumen_twilio():
 
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_webhook():
-    from_number = request.values.get('From', '')
     body = request.values.get('Body', '')
 
     try:
@@ -94,7 +91,10 @@ def whatsapp_webhook():
     except Exception:
         comando = ""
 
-    with open("inversiones.json", "r") as f:
+    base_path = os.path.dirname(__file__)
+    json_path = os.path.join(base_path, 'inversiones.json')
+
+    with open(json_path, "r") as f:
         inversiones = json.load(f)
 
     if comando == "RESUMEN":
@@ -141,7 +141,7 @@ def whatsapp_webhook():
             inversiones[simbolo] = [{"cantidad": cantidad, "precio_compra": precio}]
         respuesta = f"Compra registrada: {simbolo} {cantidad} acciones a ${precio}"
 
-    with open("inversiones.json", "w") as f:
+    with open(json_path, "w") as f:
         json.dump(inversiones, f, indent=4)
 
     resumen = "\n\nInversiones actuales:\n"
@@ -152,12 +152,9 @@ def whatsapp_webhook():
     respuesta_completa = respuesta + resumen
     return Response(f"<Response><Message>{respuesta_completa}</Message></Response>", mimetype='text/xml')
 
-# Nuevo endpoint para enviar resumen manualmente
 @app.route("/resumen", methods=["GET"])
 def resumen_manual():
     resultado = enviar_resumen_twilio()
     return resultado, 200
 
-if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+# Nota: No es necesario app.run() explícito para Vercel
