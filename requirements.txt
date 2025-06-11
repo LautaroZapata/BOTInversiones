@@ -1,4 +1,5 @@
 flask
+yfinance
 twilio
 gunicorn
 python-dotenv
