@@ -1,12 +1,14 @@
 from flask import Flask, request, Response
 import json
 import os
-import yfinance as yf
 from twilio.rest import Client
 from datetime import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
+import atexit
 
 app = Flask(__name__)
 
+# Función para leer inversiones y armar el resumen
 def resumen_inversiones(inversiones):
     resumen = "Inversiones actuales:\n"
     for simbolo, operaciones in inversiones.items():
@@ -14,10 +16,19 @@ def resumen_inversiones(inversiones):
         resumen += f"{simbolo}: {total_cantidad} acciones\n"
     return resumen
 
-def enviar_resumen_por_whatsapp(inversiones):
+# Función para enviar resumen por WhatsApp usando Twilio
+def enviar_resumen_twilio():
+    base_path = os.path.dirname(__file__)
+    json_path = os.path.join(base_path, 'inversiones.json')
+
+    with open(json_path, "r") as file:
+        inversiones = json.load(file)
+
     total_invertido = 0
     valor_actual_total = 0
-    resumen = f"📊 *Estado de Inversiones - {datetime.now().strftime('%d/%m/%Y')}*\n"
+    resumen = f"📊 *Estado de Inversiones - {datetime.now().strftime('%d/%m/%Y %H:%M')}*\n"
+
+    import yfinance as yf
 
     for simbolo, compras in inversiones.items():
         cantidad_total = 0
@@ -30,10 +41,7 @@ def enviar_resumen_por_whatsapp(inversiones):
         total_invertido += costo_total
 
         accion = yf.Ticker(simbolo)
-        try:
-            precio_actual = accion.history(period="1d")["Close"].iloc[0]
-        except Exception:
-            precio_actual = 0
+        precio_actual = accion.history(period="1d")["Close"].iloc[0]
 
         valor_actual = cantidad_total * precio_actual
         valor_actual_total += valor_actual
@@ -68,20 +76,18 @@ def enviar_resumen_por_whatsapp(inversiones):
     to_whatsapp_number = os.environ.get("TWILIO_WHATSAPP_TO")
 
     if not all([account_sid, auth_token, from_whatsapp_number, to_whatsapp_number]):
-        print("Error: Falta alguna variable de entorno de Twilio")
+        print("Error: Falta alguna variable de entorno de Twilio.")
         return
 
     client = Client(account_sid, auth_token)
 
-    try:
-        message = client.messages.create(
-            body=resumen,
-            from_=from_whatsapp_number,
-            to=to_whatsapp_number
-        )
-        print("✅ Mensaje de resumen enviado:", message.sid)
-    except Exception as e:
-        print("Error enviando mensaje de resumen:", e)
+    message = client.messages.create(
+        body=resumen,
+        from_=from_whatsapp_number,
+        to=to_whatsapp_number
+    )
+
+    print(f"✅ Mensaje automático enviado: {message.sid}")
 
 @app.route("/whatsapp", methods=["POST"])
 def whatsapp_webhook():
@@ -137,19 +143,23 @@ def whatsapp_webhook():
             inversiones[simbolo] = [{"cantidad": cantidad, "precio_compra": precio}]
         respuesta = f"Compra registrada: {simbolo} {cantidad} acciones a ${precio}"
 
-    # Guardar cambios
     with open("inversiones.json", "w") as f:
         json.dump(inversiones, f, indent=4)
 
-    # Enviar resumen actualizado por WhatsApp
-    enviar_resumen_por_whatsapp(inversiones)
-
-    # Agregar resumen breve al mensaje de respuesta
-    resumen_breve = resumen_inversiones(inversiones)
-    respuesta_completa = respuesta + "\n\n" + resumen_breve
+    resumen = resumen_inversiones(inversiones)
+    respuesta_completa = respuesta + "\n\n" + resumen
 
     return Response(f"<Response><Message>{respuesta_completa}</Message></Response>", mimetype='text/xml')
 
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
+
+    # Configurar scheduler
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(enviar_resumen_twilio, 'cron', hour='12,17', minute=0)  # 12:00 y 17:00
+    scheduler.start()
+
+    atexit.register(lambda: scheduler.shutdown())
+
     app.run(host="0.0.0.0", port=port)
