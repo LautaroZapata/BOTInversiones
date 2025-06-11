@@ -8,8 +8,11 @@ import json
 from twilio.rest import Client
 from datetime import datetime
 
-# 1. Leer inversiones
-with open(r"C:\Development\BOTInv\inversiones.json", "r") as file:
+# 1. Leer inversiones con ruta relativa al script
+base_path = os.path.dirname(__file__)
+json_path = os.path.join(base_path, 'inversiones.json')
+
+with open(json_path, "r") as file:
     inversiones = json.load(file)
 
 # 2. Procesar inversiones
