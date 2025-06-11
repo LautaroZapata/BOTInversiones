@@ -31,7 +31,8 @@ for simbolo, compras in inversiones.items():
     total_invertido += costo_total
 
     accion = yf.Ticker(simbolo)
-    precio_actual = accion.history(period="1d")["Close"][0]
+    precio_actual = accion.history(period="1d")["Close"].iloc[0]
+
     valor_actual = cantidad_total * precio_actual
     valor_actual_total += valor_actual
 
